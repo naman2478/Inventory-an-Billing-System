@@ -1,376 +1,355 @@
-
+// ============================================================
+//  Project 7 : Inventory and Billing System  (C++ / OOP)
+//  Concepts  : Classes & objects, constructors, operator
+//              overloading (Money), vectors, iterators,
+//              file handling.
+//  Menu uses a while loop + if / else-if (no switch).
+//  Compile   : g++ -std=c++11 inventory_billing.cpp -o shop
+// ============================================================
 #include <iostream>
-#include <vector>
 #include <fstream>
+#include <sstream>
 #include <iomanip>
 #include <string>
-#include <limits>
+#include <vector>
 using namespace std;
 
-// Money class
+const string PRODUCT_FILE = "products.txt";
+const string BILL_FILE    = "bills.txt";
+
+// Optional, simple discount and tax settings
+const long long DISCOUNT_LIMIT_RUPEES = 1000;  // discount if subtotal >= this
+const int       DISCOUNT_PERCENT      = 5;
+const int       TAX_PERCENT           = 5;
+
+// ------------------------------------------------------------
+//  Money : stores amount in paise to avoid floating point errors
+// ------------------------------------------------------------
 class Money {
-private:
-    double amount;
-
+    long long paise;
 public:
-    // Constructor
-    Money(double a = 0) {
-        amount = a;
-    }
+    Money() : paise(0) {}                                  // default constructor
+    explicit Money(long long p) : paise(p) {}              // from paise
+    static Money fromRupees(double r) { return Money((long long)(r * 100 + 0.5)); }
 
-    double getAmount() const {
-        return amount;
-    }
+    long long getPaise() const { return paise; }
 
-    // Operator overloading
-    Money operator+(const Money& m) const {
-        return Money(amount + m.amount);
+    Money  operator+(const Money& o) const { return Money(paise + o.paise); }
+    Money  operator-(const Money& o) const { return Money(paise - o.paise); }
+    Money  operator*(int n) const          { return Money(paise * n); }
+    Money& operator+=(const Money& o)      { paise += o.paise; return *this; }
+    bool   operator>=(const Money& o) const { return paise >= o.paise; }
+    bool   operator<(const Money& o) const  { return paise < o.paise; }
+
+    Money percent(int pct) const { return Money(paise * pct / 100); }
+
+    friend ostream& operator<<(ostream& os, const Money& m) {
+        ostringstream s;
+        s << "Rs. " << m.paise / 100 << "."
+          << setw(2) << setfill('0') << m.paise % 100;
+        return os << s.str();
     }
 };
 
-// Product class
+// ------------------------------------------------------------
+//  Product : one item in the shop catalogue
+// ------------------------------------------------------------
 class Product {
-private:
-    int productID;
+    int    id;
     string name;
-    double price;
-    int quantity;
-
+    Money  price;
+    int    stock;
 public:
-    // Constructor
-    Product(int id = 0, string n = "",
-            double p = 0, int q = 0) {
-        productID = id;
-        name = n;
-        price = p;
-        quantity = q;
-    }
+    Product() : id(0), stock(0) {}
+    Product(int i, const string& n, Money p, int s)
+        : id(i), name(n), price(p), stock(s) {}
 
-    int getID() const {
-        return productID;
-    }
+    int           getId()    const { return id; }
+    const string& getName()  const { return name; }
+    Money         getPrice() const { return price; }
+    int           getStock() const { return stock; }
 
-    string getName() const {
-        return name;
-    }
+    void reduceStock(int q) { stock -= q; }
+    void addStock(int q)    { stock += q; }
 
-    double getPrice() const {
-        return price;
-    }
-
-    int getQuantity() const {
-        return quantity;
-    }
-
-    // Update stock
-    void updateStock(int q) {
-        quantity -= q;
-    }
-
-    // Display product
     void display() const {
-        cout << left << setw(10) << productID
-             << setw(20) << name
-             << setw(12) << fixed << setprecision(2)
-             << price << quantity << endl;
+        cout << left << setw(8) << id << setw(22) << name
+             << right << setw(14);
+        ostringstream p; p << price;
+        cout << p.str() << setw(10) << stock << "\n";
+    }
+
+    // file format:  id|name|paise|stock
+    void writeTo(ostream& os) const {
+        os << id << '|' << name << '|' << price.getPaise() << '|' << stock << "\n";
+    }
+    bool readFrom(const string& line) {
+        istringstream ss(line);
+        string a, n, p, s;
+        if (!getline(ss, a, '|') || !getline(ss, n, '|') ||
+            !getline(ss, p, '|') || !getline(ss, s)) return false;
+        id    = atoi(a.c_str());
+        name  = n;
+        price = Money(atoll(p.c_str()));
+        stock = atoi(s.c_str());
+        return true;
     }
 };
 
-// Inventory class
+// ------------------------------------------------------------
+//  Inventory : manages vector<Product> and the product file
+// ------------------------------------------------------------
 class Inventory {
-private:
-    vector<Product> products;
-
+    vector<Product> items;
 public:
+    Inventory() { load(); }
 
-    // Add product
-    void addProduct() {
-        int id, qty;
-        string name;
-        double price;
-
-        cout << "\nEnter Product ID: ";
-        cin >> id;
-
-        if (searchProduct(id) != NULL) {
-            cout << "Product ID already exists!\n";
-            return;
-        }
-
-        cin.ignore(numeric_limits<streamsize>::max(), '\n');
-
-        cout << "Enter Product Name: ";
-        getline(cin, name);
-
-        cout << "Enter Price: ";
-        cin >> price;
-
-        cout << "Enter Quantity: ";
-        cin >> qty;
-
-        if (id <= 0 || price < 0 || qty < 0 || name.empty()) {
-            cout << "Invalid product details!\n";
-            return;
-        }
-
-        products.push_back(Product(id, name, price, qty));
-
-        cout << "Product added successfully!\n";
-    }
-
-    // Display all products
-    void displayProducts() {
-        if (products.empty()) {
-            cout << "\nNo products available!\n";
-            return;
-        }
-
-        cout << "\n========== PRODUCT LIST ==========\n";
-
-        cout << left << setw(10) << "ID"
-             << setw(20) << "Name"
-             << setw(12) << "Price"
-             << "Stock\n";
-
-        for (vector<Product>::iterator it = products.begin();
-             it != products.end(); it++) {
-
-            it->display();
+    void load() {
+        items.clear();
+        ifstream in(PRODUCT_FILE.c_str());
+        string line;
+        while (getline(in, line)) {
+            Product p;
+            if (!line.empty() && p.readFrom(line)) items.push_back(p);
         }
     }
 
-    // Search product by ID
-    Product* searchProduct(int id) {
-        for (vector<Product>::iterator it = products.begin();
-             it != products.end(); it++) {
+    void save() const {
+        ofstream out(PRODUCT_FILE.c_str());
+        for (vector<Product>::const_iterator it = items.begin(); it != items.end(); ++it)
+            it->writeTo(out);
+    }
 
-            if (it->getID() == id) {
-                return &(*it);
-            }
-        }
-
+    // returns pointer to product or NULL (uses iterator)
+    Product* find(int id) {
+        for (vector<Product>::iterator it = items.begin(); it != items.end(); ++it)
+            if (it->getId() == id) return &(*it);
         return NULL;
     }
 
-    void searchByID() {
-        int id;
-
-        cout << "\nEnter Product ID to search: ";
-        cin >> id;
-
-        Product* p = searchProduct(id);
-
-        if (p != NULL) {
-            cout << "\nProduct Found!\n";
-
-            cout << left << setw(10) << "ID"
-                 << setw(20) << "Name"
-                 << setw(12) << "Price"
-                 << "Stock\n";
-
-            p->display();
-        }
-        else {
-            cout << "Product not found!\n";
-        }
+    bool add(const Product& p) {
+        if (find(p.getId()) != NULL) return false;   // duplicate ID
+        items.push_back(p);
+        save();
+        return true;
     }
 
-    // Generate customer bill
-    void generateBill() {
-        int id, qty;
-        Money subtotal(0);
-
-        cout << "\n========== CUSTOMER BILL ==========\n";
-
-        cout << left << setw(10) << "ID"
-             << setw(20) << "Name"
-             << setw(10) << "Qty"
-             << "Amount\n";
-
-        while (true) {
-            cout << "\nEnter Product ID (0 to finish): ";
-            cin >> id;
-
-            if (id == 0) {
-                break;
-            }
-
-            Product* p = searchProduct(id);
-
-            if (p == NULL) {
-                cout << "Product not found!\n";
-                continue;
-            }
-
-            cout << "Enter Quantity: ";
-            cin >> qty;
-
-            if (qty <= 0) {
-                cout << "Invalid quantity!\n";
-                continue;
-            }
-
-            if (qty > p->getQuantity()) {
-                cout << "Insufficient stock!\n";
-                cout << "Available quantity: "
-                     << p->getQuantity() << endl;
-                continue;
-            }
-
-            double itemAmount = p->getPrice() * qty;
-
-            cout << left << setw(10) << p->getID()
-                 << setw(20) << p->getName()
-                 << setw(10) << qty
-                 << fixed << setprecision(2)
-                 << itemAmount << endl;
-
-            subtotal = subtotal + Money(itemAmount);
-
-            // Update stock
-            p->updateStock(qty);
-        }
-
-        cout << "\n-----------------------------------\n";
-
-        cout << "Subtotal: Rs. "
-             << fixed << setprecision(2)
-             << subtotal.getAmount() << endl;
-
-        cout << "Final Amount: Rs. "
-             << subtotal.getAmount() << endl;
-
-        cout << "-----------------------------------\n";
-
-        saveToFile();
-
-        cout << "Bill generated successfully!\n";
+    void displayAll() const {
+        if (items.empty()) { cout << "No products in stock.\n"; return; }
+        printHeader();
+        for (vector<Product>::const_iterator it = items.begin(); it != items.end(); ++it)
+            it->display();
     }
 
-    // Save products in file
-    void saveToFile() {
-        ofstream file("inventory.txt");
-
-        if (!file) {
-            cout << "Error saving inventory file!\n";
-            return;
-        }
-
-        for (vector<Product>::iterator it = products.begin();
-             it != products.end(); it++) {
-
-            file << it->getID() << '\n';
-            file << it->getName() << '\n';
-            file << it->getPrice() << '\n';
-            file << it->getQuantity() << '\n';
-        }
-
-        file.close();
-    }
-
-    // Load products from file
-    void loadFromFile() {
-        ifstream file("inventory.txt");
-
-        if (!file) {
-            return;
-        }
-
-        int id, qty;
-        double price;
-        string name;
-
-        while (file >> id) {
-
-            file.ignore(numeric_limits<streamsize>::max(), '\n');
-
-            if (!getline(file, name)) {
-                break;
-            }
-
-            if (!(file >> price >> qty)) {
-                break;
-            }
-
-            file.ignore(numeric_limits<streamsize>::max(), '\n');
-
-            if (id > 0 && price >= 0 && qty >= 0) {
-                products.push_back(Product(id, name, price, qty));
-            }
-        }
-
-        file.close();
+    static void printHeader() {
+        cout << "\n" << left << setw(8) << "ID" << setw(22) << "Name"
+             << right << setw(14) << "Price" << setw(10) << "Stock" << "\n";
+        cout << string(54, '-') << "\n";
     }
 };
 
-// Main function
-int main() {
+// ------------------------------------------------------------
+//  BillItem and Bill
+// ------------------------------------------------------------
+struct BillItem {
+    int    id;
+    string name;
+    Money  price;
+    int    qty;
+    BillItem(int i, const string& n, Money p, int q) : id(i), name(n), price(p), qty(q) {}
+    Money lineTotal() const { return price * qty; }
+};
 
-    Inventory inventory;
+class Bill {
+    vector<BillItem> lines;
+    string customer;
+public:
+    explicit Bill(const string& c) : customer(c) {}
 
-    inventory.loadFromFile();
+    bool empty() const { return lines.empty(); }
 
-    int choice;
+    int qtyAlreadyAdded(int id) const {
+        for (vector<BillItem>::const_iterator it = lines.begin(); it != lines.end(); ++it)
+            if (it->id == id) return it->qty;
+        return 0;
+    }
 
-    do {
+    void addItem(const Product& p, int qty) {
+        for (vector<BillItem>::iterator it = lines.begin(); it != lines.end(); ++it)
+            if (it->id == p.getId()) { it->qty += qty; return; }   // merge same product
+        lines.push_back(BillItem(p.getId(), p.getName(), p.getPrice(), qty));
+    }
 
-        cout << "\n====================================\n";
-        cout << "     INVENTORY AND BILLING SYSTEM\n";
-        cout << "====================================\n";
+    Money subtotal() const {
+        Money total;
+        for (vector<BillItem>::const_iterator it = lines.begin(); it != lines.end(); ++it)
+            total += it->lineTotal();
+        return total;
+    }
+    Money discount() const {
+        Money sub = subtotal();
+        if (sub >= Money(DISCOUNT_LIMIT_RUPEES * 100)) return sub.percent(DISCOUNT_PERCENT);
+        return Money(0);
+    }
+    Money tax() const      { return (subtotal() - discount()).percent(TAX_PERCENT); }
+    Money finalAmount() const { return subtotal() - discount() + tax(); }
 
-        cout << "1. Add Product\n";
-        cout << "2. Display Products\n";
-        cout << "3. Search Product\n";
-        cout << "4. Generate Customer Bill\n";
-        cout << "5. Exit\n";
-
-        cout << "\nEnter your choice: ";
-        cin >> choice;
-
-        // Using if-else instead of switch-case
-
-        if (choice == 1) {
-
-            inventory.addProduct();
-            inventory.saveToFile();
-
+    void print(ostream& os) const {
+        os << "\n==================== BILL ====================\n";
+        os << "Customer : " << customer << "\n";
+        os << left << setw(6) << "ID" << setw(20) << "Item" << right
+           << setw(5) << "Qty" << setw(13) << "Price" << setw(14) << "Amount" << "\n";
+        os << string(58, '-') << "\n";
+        for (vector<BillItem>::const_iterator it = lines.begin(); it != lines.end(); ++it) {
+            ostringstream p, a;
+            p << it->price; a << it->lineTotal();
+            os << left << setw(6) << it->id << setw(20) << it->name << right
+               << setw(5) << it->qty << setw(13) << p.str() << setw(14) << a.str() << "\n";
         }
+        os << string(58, '-') << "\n";
+        printRow(os, "Subtotal", subtotal());
+        printRow(os, "Discount (" + toStr(DISCOUNT_PERCENT) + "%)", discount());
+        printRow(os, "Tax (" + toStr(TAX_PERCENT) + "%)", tax());
+        printRow(os, "FINAL AMOUNT", finalAmount());
+        os << "==============================================\n";
+    }
 
-        else if (choice == 2) {
+    void appendToFile() const {
+        ofstream out(BILL_FILE.c_str(), ios::app);
+        print(out);
+    }
 
-            inventory.displayProducts();
-
+    // reduce stock in inventory for every line
+    void updateStock(Inventory& inv) const {
+        for (vector<BillItem>::const_iterator it = lines.begin(); it != lines.end(); ++it) {
+            Product* p = inv.find(it->id);
+            if (p) p->reduceStock(it->qty);
         }
+        inv.save();
+    }
 
-        else if (choice == 3) {
+private:
+    static string toStr(int n) { ostringstream s; s << n; return s.str(); }
+    static void printRow(ostream& os, const string& label, const Money& m) {
+        ostringstream a; a << m;
+        os << left << setw(40) << label << right << setw(18) << a.str() << "\n";
+    }
+};
 
-            inventory.searchByID();
-
-        }
-
-        else if (choice == 4) {
-
-            inventory.generateBill();
-
-        }
-
-        else if (choice == 5) {
-
-            inventory.saveToFile();
-
-            cout << "\nThank you for using "
-                 << "Inventory and Billing System!\n";
-
-        }
-
-        else {
-
-            cout << "\nInvalid choice! Please try again.\n";
-
-        }
-
-    } while (choice != 5);
-
-    return 0;
+// ------------------------------------------------------------
+//  Input helpers
+// ------------------------------------------------------------
+int readInt(const string& prompt) {
+    string line;
+    while (true) {
+        cout << prompt;
+        getline(cin, line);
+        istringstream ss(line);
+        int v; char extra;
+        if (ss >> v && !(ss >> extra)) return v;
+        cout << "  Invalid number, try again.\n";
+    }
 }
 
+double readDouble(const string& prompt) {
+    string line;
+    while (true) {
+        cout << prompt;
+        getline(cin, line);
+        istringstream ss(line);
+        double v; char extra;
+        if (ss >> v && !(ss >> extra)) return v;
+        cout << "  Invalid number, try again.\n";
+    }
+}
+
+string readLine(const string& prompt) {
+    string s;
+    do {
+        cout << prompt;
+        getline(cin, s);
+    } while (s.empty());
+    return s;
+}
+
+// ------------------------------------------------------------
+//  Menu actions
+// ------------------------------------------------------------
+void addProduct(Inventory& inv) {
+    int id = readInt("Product ID      : ");
+    if (id <= 0) { cout << "ID must be positive.\n"; return; }
+    string name = readLine("Product name    : ");
+    for (size_t i = 0; i < name.size(); ++i) if (name[i] == '|') name[i] = '-';
+    double price = readDouble("Price (Rs.)     : ");
+    int qty = readInt("Quantity in stock: ");
+    if (price < 0 || qty < 0) { cout << "Price and quantity cannot be negative.\n"; return; }
+
+    if (inv.add(Product(id, name, Money::fromRupees(price), qty)))
+        cout << "Product added.\n";
+    else
+        cout << "A product with ID " << id << " already exists.\n";
+}
+
+void searchProduct(Inventory& inv) {
+    int id = readInt("Enter product ID to search: ");
+    Product* p = inv.find(id);
+    if (p) { Inventory::printHeader(); p->display(); }
+    else   cout << "Product not found.\n";
+}
+
+void makeBill(Inventory& inv) {
+    Bill bill(readLine("Customer name : "));
+    cout << "Enter product ID and quantity (ID 0 to finish).\n";
+
+    while (true) {
+        int id = readInt("Product ID (0 = done): ");
+        if (id == 0) break;
+
+        Product* p = inv.find(id);
+        if (p == NULL) { cout << "  Product not found.\n"; continue; }
+
+        int qty = readInt("Quantity for " + p->getName() + ": ");
+        if (qty <= 0) { cout << "  Quantity must be positive.\n"; continue; }
+
+        int available = p->getStock() - bill.qtyAlreadyAdded(id);
+        if (qty > available) {
+            cout << "  Not enough stock. Available: " << available << "\n";
+            continue;
+        }
+        bill.addItem(*p, qty);
+        cout << "  Added.\n";
+    }
+
+    if (bill.empty()) { cout << "No items on the bill.\n"; return; }
+
+    bill.print(cout);
+    bill.updateStock(inv);
+    bill.appendToFile();
+    cout << "Stock updated and bill saved to " << BILL_FILE << ".\n";
+}
+
+// ------------------------------------------------------------
+//  main : loop-based menu using if / else-if
+// ------------------------------------------------------------
+int main() {
+    Inventory inv;
+    bool running = true;
+
+    while (running) {
+        cout << "\n====== SHOP INVENTORY & BILLING ======\n"
+             << "1. Add product\n"
+             << "2. Display all products\n"
+             << "3. Search product by ID\n"
+             << "4. Create customer bill\n"
+             << "5. Exit\n";
+        int choice = readInt("Enter choice: ");
+
+        if (choice == 1)      addProduct(inv);
+        else if (choice == 2) inv.displayAll();
+        else if (choice == 3) searchProduct(inv);
+        else if (choice == 4) makeBill(inv);
+        else if (choice == 5) { inv.save(); cout << "Goodbye!\n"; running = false; }
+        else                  cout << "Invalid choice, try again.\n";
+    }
+    return 0;
+}
